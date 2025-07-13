@@ -246,7 +246,7 @@ class Drawer:
         draw.multiline_text((group.full_box[0], group.full_box[1],), wrapped_text, font=self.font, fill="black")
 
 
-if __name__ == "__main__":
+def main():
     parser = Input()
     parser.run()
     reader = Reader(parser.get_images(), parser.get_skip_ocr())
@@ -257,3 +257,7 @@ if __name__ == "__main__":
     translator.run()
     drawer = Drawer(translator.get_pages(), parser.get_is_debug())
     drawer.run()
+
+
+if __name__ == "__main__":
+    main()
