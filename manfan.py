@@ -3,6 +3,7 @@
 from PIL import Image, ImageFont, ImageDraw, ImageEnhance
 from paddleocr import PaddleOCR
 from translate import Translator as TranslatorEngine
+from pathlib import Path
 import json
 import argparse
 import sys
@@ -13,7 +14,7 @@ class Input:
     def __init__(self):
         self.parser = argparse.ArgumentParser(
             description="Automatically recognize Japanese text from images and translate it to English",
-            epilog="For more information, visit https://github.com/manfan/ManfanOCR",
+            epilog="For more information, visit https://github.com/manfanocr/ManfanOCR",
         )
         self.parser.add_argument(
             nargs='*',
@@ -22,11 +23,15 @@ class Input:
             metavar='FILE',
         )
         self.parser.add_argument(
+            '-s', '--skip-ocr',
+            dest='skip_ocr',
+            action='store_true',
+            help="skip OCR for previously processed files",
+        )
+        self.parser.add_argument(
             '-d', '--debug',
             dest='debug',
-            type=bool,
-            default=False,
-            metavar='BOOL',
+            action='store_true',
             help="enable debug mode",
         )
     def run(self):
@@ -35,11 +40,14 @@ class Input:
         return self.arguments.images
     def get_is_debug(self):
         return self.arguments.debug
+    def get_skip_ocr(self):
+        return self.arguments.skip_ocr
 
 
 class Reader:
-    def __init__(self, images):
+    def __init__(self, images, skip_ocr):
         self.images = images
+        self.skip_ocr = skip_ocr
         self.processed = []
         self.engine = PaddleOCR(
             use_doc_orientation_classify=False,
@@ -55,6 +63,10 @@ class Reader:
                 print(f"Invalid file format: '{image}'")
                 continue
             print(f"Reading image: '{image}'")
+            if self.skip_ocr and os.path.isfile("output/" + Path(image).stem + "_res.json"):
+                print(f"Skipping OCR for '{image}'")
+                self.processed.append(image)
+                continue
             result = self.engine.predict(input=image)
             for res in result:
                 res.save_to_json("output")
@@ -135,7 +147,7 @@ class Page:
         self.load_boxes()
         self.make_groups()
     def load_data(self):
-        json_path = "output/" + self.image.split('.').pop(0) + '_res.json'
+        json_path = "output/" + Path(self.image).stem + '_res.json'
         with open(json_path, 'r') as file:
             self.data = json.load(file)
     def load_boxes(self):
@@ -210,7 +222,7 @@ class Drawer:
                 Drawer.fill_old_text(group, draw)
                 self.debug_draw(group, draw)
                 self.draw_translation(group, draw)
-                image.save("output/" + page.image, "JPEG")
+                image.save("output/" + Path(page.image).stem + ".jpg", "JPEG")
         print("Done!")
     def fill_old_text(group, draw):
         for box in group.boxes:
@@ -237,7 +249,7 @@ class Drawer:
 if __name__ == "__main__":
     parser = Input()
     parser.run()
-    reader = Reader(parser.get_images())
+    reader = Reader(parser.get_images(), parser.get_skip_ocr())
     reader.run()
     pager = Pager(reader.get_images(), parser.get_is_debug())
     pager.run()
