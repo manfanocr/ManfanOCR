@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from PIL import Image, ImageFont, ImageDraw, ImageEnhance
+from ollama import chat, ChatResponse
 from paddleocr import PaddleOCR
 from translate import Translator as TranslatorEngine
 from pathlib import Path
@@ -34,6 +35,12 @@ class Input:
             action='store_true',
             help="enable debug mode",
         )
+        self.parser.add_argument(
+            '-a', '--use-ai-translate',
+            dest='use_ai_translate',
+            action='store_true',
+            help="switch to local AI translation",
+        )
     def run(self):
         self.arguments = self.parser.parse_args()
     def get_images(self):
@@ -42,9 +49,13 @@ class Input:
         return self.arguments.debug
     def get_skip_ocr(self):
         return self.arguments.skip_ocr
+    def get_use_ai_translate(self):
+        return self.arguments.use_ai_translate
 
 
 class Reader:
+    DET_MODEL_PATH = Path.home() / '.paddlex/official_models/PP-OCRv5_mobile_det'
+    REC_MODEL_PATH = Path.home() / '.paddlex/official_models/PP-OCRv5_mobile_rec'
     def __init__(self, images, skip_ocr):
         self.images = images
         self.skip_ocr = skip_ocr
@@ -52,7 +63,12 @@ class Reader:
         self.engine = PaddleOCR(
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
-            use_textline_orientation=False
+            use_textline_orientation=False,
+            text_detection_model_name="PP-OCRv5_mobile_det",
+            text_recognition_model_name="PP-OCRv5_mobile_rec",
+            text_detection_model_dir=Reader.DET_MODEL_PATH,
+            text_recognition_model_dir=Reader.REC_MODEL_PATH,
+            device="gpu",
         )
     def run(self):
         for image in self.images:
@@ -196,16 +212,35 @@ class Pager:
 
 
 class Translator:
-    def __init__(self, pages):
+    def __init__(self, pages, is_debug, use_ai_translate):
         self.pages = pages
+        self.is_debug = is_debug
+        self.use_ai_translate = use_ai_translate
         self.engine = TranslatorEngine(from_lang="ja", to_lang="en")
     def run(self):
         for page in self.pages:
             print(f"Translating image: '{page.image}'")
             for group in page.groups:
+                group.translation = self.translate(group.full_text)
                 group.translation = self.engine.translate(group.full_text)
     def get_pages(self):
         return self.pages
+    def translate(self, text):
+        translation = ""
+        if self.use_ai_translate:
+            translation = self.ask_ai(text)
+        else:
+            translation = self.engine.translate(text)
+        if self.is_debug:
+            print("Translation:", translation)
+        return translation
+    def ask_ai(self, text):
+        return chat(model="gemma3:12b", messages=[
+        {
+            'role': 'user',
+            'content': f'Translate this OCR text from Japanese to English. Do not include any other information or explanations. Japanese: {text} English:',
+        },
+        ]).message.content
 
 
 class Drawer:
@@ -253,7 +288,7 @@ def main():
     reader.run()
     pager = Pager(reader.get_images(), parser.get_is_debug())
     pager.run()
-    translator = Translator(pager.get_pages())
+    translator = Translator(pager.get_pages(), parser.get_is_debug(), parser.get_use_ai_translate())
     translator.run()
     drawer = Drawer(translator.get_pages(), parser.get_is_debug())
     drawer.run()
